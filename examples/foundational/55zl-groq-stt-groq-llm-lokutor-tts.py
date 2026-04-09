@@ -43,6 +43,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
+from pipecat.observers.loggers.metrics_log_observer import MetricsLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -87,7 +88,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = LokutorTTSService(
         api_key=os.getenv("LOKUTOR_API_KEY"),
-        voice_id="M1",
+        voice_id="F1",
         params=LokutorTTSService.InputParams(
             language=Language.EN,
             speed=1.0,
@@ -116,6 +117,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     task = PipelineTask(
         pipeline,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+        observers=[MetricsLogObserver()],
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 

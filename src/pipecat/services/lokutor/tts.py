@@ -51,7 +51,7 @@ class LokutorTTSService(WebsocketTTSService):
         self,
         *,
         api_key: str,
-        voice_id: str = "M1",
+        voice_id: str = "F1",
         sample_rate: int = 44100,
         params: Optional[InputParams] = None,
         settings: Optional[LokutorTTSSettings] = None,
@@ -152,11 +152,18 @@ class LokutorTTSService(WebsocketTTSService):
             raise ConnectionError("Lokutor websocket not connected")
         return self._websocket
 
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate metrics.
+
+        Returns:
+            True since Lokutor TTS service supports metrics.
+        """
+        return True
+
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
-        await self.start_ttfb_metrics()
         await self.start_tts_usage_metrics(text)
         yield TTSStartedFrame(context_id=context_id)
 
@@ -178,8 +185,13 @@ class LokutorTTSService(WebsocketTTSService):
 
             request_json = json.dumps(request)
             logger.debug(f"Sending request to Lokutor: {request_json}")
-            await self._get_websocket().send(request_json)
 
+            # Start TTFB measurement right before sending the request
+            await self.start_ttfb_metrics()
+            await self._get_websocket().send(request_json)
+            logger.debug("Request sent to Lokutor, waiting for first response...")
+
+            first_audio_received = False
             while True:
                 try:
                     logger.debug("Waiting for message from Lokutor...")
@@ -209,7 +221,10 @@ class LokutorTTSService(WebsocketTTSService):
                     else:
                         # Binary audio data
                         logger.debug(f"Received audio data: {len(message)} bytes")
-                        await self.stop_ttfb_metrics()
+                        if not first_audio_received:
+                            logger.debug("First audio chunk received - stopping TTFB metrics")
+                            await self.stop_ttfb_metrics()
+                            first_audio_received = True
                         yield TTSAudioRawFrame(message, self.sample_rate, 1)
                 except asyncio.TimeoutError:
                     logger.error("Timeout waiting for Lokutor response")
@@ -228,7 +243,9 @@ class LokutorTTSService(WebsocketTTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             logger.debug(f"{self}: Finished TTS [{text}]")
-            await self.stop_ttfb_metrics()
+            # Only stop TTFB metrics if we haven't already (i.e., no audio was received)
+            if not first_audio_received:
+                await self.stop_ttfb_metrics()
             yield TTSStoppedFrame(context_id=context_id)
 
 
